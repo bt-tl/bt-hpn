@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 import secrets
 import time
@@ -561,7 +562,12 @@ async def main():
             await message.answer("Buka link file yang kamu punya ya (hepifile.com?start=...).")
 
     try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        except Exception:
+            pass
+    
         await dp.start_polling(bot)
+
     finally:
         await pool.close()
 
