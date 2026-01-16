@@ -26,9 +26,13 @@ from psycopg_pool import AsyncConnectionPool
 # CONFIG (Railway Variables)
 # =========================
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "8495830935:AAFQP9hOq31jFUdvTZs4YGQlEdJM_S05uq8").strip()
-CHANNEL_ID = int((os.getenv("CHANNEL_ID") or "-1003642090936").strip() or "0")
-BOT_USERNAME = (os.getenv("BOT_USERNAME") or "hepini_storage_bot").strip().lstrip("@")
+CHANNEL_ID = int((os.getenv("CHANNEL_ID") or "-1003642090936").strip() or "")
+BOT_USERNAME = (os.getenv("BOT_USERNAME") or "hepini_storage_bot").strip().lstrip("@")  # optional (kalau kamu pakai t.me link)
 DATABASE_URL = (os.getenv("DATABASE_URL") or "postgresql://postgres:IMvrGqqSnMiWTPReoTzkmIDZIIpICxgL@yamabiko.proxy.rlwy.net:12902/railway").strip()
+
+# Base URL publik kamu, contoh: https://hepifile.com
+# (kalau gak di-set, fallback ke t.me/<bot>?start=...)
+PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "https://hepifile.com").strip().rstrip("/")
 
 OWNER_IDS = set()
 _raw_owner = (os.getenv("OWNER_IDS") or "5577603728,6016383456").strip()
@@ -37,17 +41,17 @@ for part in _raw_owner.split(","):
     if part:
         OWNER_IDS.add(int(part))
 
-BROADCAST_RATE = float((os.getenv("BROADCAST_RATE") or "20").strip())   # msg/sec
-BROADCAST_BATCH = int((os.getenv("BROADCAST_BATCH") or "2000").strip()) # fetch per batch
+BROADCAST_RATE = float((os.getenv("BROADCAST_RATE") or "20").strip())     # msg/sec
+BROADCAST_BATCH = int((os.getenv("BROADCAST_BATCH") or "2000").strip())   # fetch per batch
+
 
 # =========================
 # REQUIRED JOIN CHANNELS (MAX 5)
-# id bisa int (-100xxx) atau username "@channel"
+# id bisa -100xxx atau "@usernamechannel"
 # =========================
 REQUIRED_CHANNELS = [
-    {"id": "-1002268843879", "name": "HEPINI OFFICIAL", "url": "https://t.me/hepiniofc/1689"},
-    {"id": "-1003692828104", "name": "Ruang Backup", "url": "https://t.me/hepini_ofcl/3"},
-    # maksimal 5 item
+    {"id": "-1002268843879", "name": "HEPINI OFFICIAL", "url": "https://t.me/hepiniofc"},
+    {"id": "-1003692828104", "name": "Ruang Backup", "url": "https://t.me/hepini_ofcl"},
 ]
 
 
