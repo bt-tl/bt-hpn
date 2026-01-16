@@ -1,9 +1,7 @@
 import os
-import re
 import asyncio
 import secrets
 import time
-from urllib.parse import quote
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
@@ -15,7 +13,6 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramBadRequest,
     TelegramNotFound,
-    TelegramConflictError,
 )
 
 import psycopg
@@ -26,13 +23,9 @@ from psycopg_pool import AsyncConnectionPool
 # CONFIG (Railway Variables)
 # =========================
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "8495830935:AAFQP9hOq31jFUdvTZs4YGQlEdJM_S05uq8").strip()
-CHANNEL_ID = int((os.getenv("CHANNEL_ID") or "-1003642090936").strip() or "")
-BOT_USERNAME = (os.getenv("BOT_USERNAME") or "hepini_storage_bot").strip().lstrip("@")  # optional (kalau kamu pakai t.me link)
-DATABASE_URL = (os.getenv("DATABASE_URL") or "postgresql://postgres:WOkxpaoRGEkzzrbAVQJwSylKVVBbVGLU@interchange.proxy.rlwy.net:15284/railway").strip()
-
-# Base URL publik kamu, contoh: https://hepifile.com
-# (kalau gak di-set, fallback ke t.me/<bot>?start=...)
-PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "https://hepifile.com").strip().rstrip("/")
+CHANNEL_ID = int((os.getenv("CHANNEL_ID") or "-1003642090936").strip() or "0")
+BOT_USERNAME = (os.getenv("BOT_USERNAME") or "hepini_storage_bot").strip().lstrip("@")
+DATABASE_URL = (os.getenv("DATABASE_URL") or "postgresql://postgres:KJywVigsgaeDNFcTLGWpoXYIKsSsBaUk@gondola.proxy.rlwy.net:43693/railway").strip()
 
 OWNER_IDS = set()
 _raw_owner = (os.getenv("OWNER_IDS") or "5577603728,6016383456").strip()
@@ -41,31 +34,30 @@ for part in _raw_owner.split(","):
     if part:
         OWNER_IDS.add(int(part))
 
-BROADCAST_RATE = float((os.getenv("BROADCAST_RATE") or "20").strip())     # msg/sec
-BROADCAST_BATCH = int((os.getenv("BROADCAST_BATCH") or "2000").strip())   # fetch per batch
-
+BROADCAST_RATE = float((os.getenv("BROADCAST_RATE") or "20").strip())   # msg/sec
+BROADCAST_BATCH = int((os.getenv("BROADCAST_BATCH") or "2000").strip()) # fetch per batch
 
 # =========================
 # REQUIRED JOIN CHANNELS (MAX 5)
-# id bisa -100xxx atau "@usernamechannel"
+# id bisa int (-100xxx) atau username "@channel"
 # =========================
 REQUIRED_CHANNELS = [
     {"id": "-1002268843879", "name": "HEPINI OFFICIAL", "url": "https://t.me/hepiniofc"},
     {"id": "-1003692828104", "name": "Ruang Backup", "url": "https://t.me/hepini_ofcl"},
+    # maksimal 5 item
 ]
-
 
 # =========================
 # VALIDATION
 # =========================
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN belum di-set di Railway Variables.")
+    raise RuntimeError("BOT_TOKEN belum di-set.")
 if CHANNEL_ID == 0:
-    raise RuntimeError("CHANNEL_ID belum di-set di Railway Variables.")
+    raise RuntimeError("CHANNEL_ID belum di-set.")
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL belum di-set di Railway Variables.")
+    raise RuntimeError("DATABASE_URL belum di-set.")
 if not OWNER_IDS:
-    raise RuntimeError("OWNER_IDS belum di-set di Railway Variables.")
+    raise RuntimeError("OWNER_IDS belum di-set.")
 if len(REQUIRED_CHANNELS) > 5:
     raise RuntimeError("REQUIRED_CHANNELS maksimal 5 item.")
 
@@ -76,62 +68,8 @@ if len(REQUIRED_CHANNELS) > 5:
 def is_owner(user_id: int) -> bool:
     return user_id in OWNER_IDS
 
-
-def extract_title(m: Message) -> str:
-    if m.document:
-        return m.document.file_name or "document"
-    if m.video:
-        return m.video.file_name or "video"
-    if m.audio:
-        if m.audio.file_name:
-            return m.audio.file_name
-        if m.audio.performer and m.audio.title:
-            return f"{m.audio.performer} - {m.audio.title}"
-        if m.audio.title:
-            return m.audio.title
-        return "audio"
-    if m.voice:
-        return "voice"
-    if m.video_note:
-        return "video_note"
-    if m.photo:
-        return "photo"
-    if m.animation:
-        return m.animation.file_name or "animation"
-    if m.sticker:
-        return f"sticker ({m.sticker.emoji or '🙂'})"
-    return "file"
-
-
-def normalize_slug_from_title(title: str) -> str:
-    """
-    Contoh:
-    "zahra 23 + 24.zip" -> "zahra23+24.zip"
-
-    - hapus spasi
-    - izinkan: a-zA-Z0-9 . _ - +
-    - batasi panjang payload start (Telegram deep link max 64 chars)
-    """
-    t = (title or "").strip()
-    t = re.sub(r"\s+", "", t)
-    t = re.sub(r"[^A-Za-z0-9._+\-]", "", t)
-
-    if not t:
-        t = "file"
-
-    # aman untuk payload + suffix
-    return t[:60]
-
-
-def make_suffix(n: int = 4) -> str:
-    # suffix hex kecil
-    if n <= 0:
-        return ""
-    # token_hex menghasilkan 2 char per byte
-    need = (n + 1) // 2
-    s = secrets.token_hex(need)
-    return s[:n]
-
+def make_slug() -> str:
+    return secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:12]
 
 def gate_text() -> str:
     if not REQUIRED_CHANNELS:
@@ -143,7 +81,6 @@ def gate_text() -> str:
         "Setelah join, klik tombol **✅ Saya sudah join**."
     )
 
-
 def join_keyboard(slug: str | None):
     kb = InlineKeyboardBuilder()
     for ch in REQUIRED_CHANNELS:
@@ -152,7 +89,6 @@ def join_keyboard(slug: str | None):
     kb.button(text="✅ Saya sudah join", callback_data=cb)
     kb.adjust(1)
     return kb.as_markup()
-
 
 async def is_joined_all(bot: Bot, user_id: int) -> bool:
     if not REQUIRED_CHANNELS:
@@ -166,11 +102,10 @@ async def is_joined_all(bot: Bot, user_id: int) -> bool:
             if status in ("left", "kicked") or status is None:
                 return False
         except Exception:
-            # bot tidak bisa cek membership (misal bot tidak ada di channel private tsb)
+            # bot gak bisa cek membership (umumnya bot tidak ada di channel private tsb)
             return False
 
     return True
-
 
 class RateLimiter:
     """Global rate limiter: target N msg/sec."""
@@ -188,32 +123,17 @@ class RateLimiter:
             self._last = time.monotonic()
 
 
-def public_link(slug: str) -> str:
-    # "+" di query biasanya dianggap spasi, jadi harus di-encode -> %2B
-    # safe: biarkan . _ - tetap literal
-    encoded = quote(slug, safe="._-")
-    if PUBLIC_BASE_URL:
-        return f"{PUBLIC_BASE_URL}?start={encoded}"
-    # fallback ke t.me
-    if BOT_USERNAME:
-        return f"https://t.me/{BOT_USERNAME}?start={encoded}"
-    return f"?start={encoded}"
-
-
 # =========================
-# DB SCHEMA (PostgreSQL)
+# DB SCHEMA
 # =========================
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS files (
   slug TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
   channel_id BIGINT NOT NULL,
   channel_message_id BIGINT NOT NULL,
   uploaded_by BIGINT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at);
 
 CREATE TABLE IF NOT EXISTS users (
   user_id BIGINT PRIMARY KEY,
@@ -232,13 +152,13 @@ CREATE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id);
 # MAIN
 # =========================
 async def main():
-    # create pool inside event loop (fix: open=False + await open())
+    # ✅ IMPORTANT: create pool inside loop / open later
     pool = AsyncConnectionPool(
         conninfo=DATABASE_URL,
         min_size=1,
         max_size=10,
         timeout=30,
-        open=False,
+        open=False,  # <= FIX utama
     )
     await pool.open()
 
@@ -276,26 +196,25 @@ async def main():
                 await cur.execute("DELETE FROM users WHERE user_id = %s;", (user_id,))
             await conn.commit()
 
-    async def db_put_file(slug: str, title: str, channel_id: int, channel_message_id: int, uploaded_by: int):
+    async def db_put_file(slug: str, channel_id: int, channel_message_id: int, uploaded_by: int):
         sql = """
-        INSERT INTO files (slug, title, channel_id, channel_message_id, uploaded_by)
-        VALUES (%s, %s, %s, %s, %s);
+        INSERT INTO files (slug, channel_id, channel_message_id, uploaded_by)
+        VALUES (%s, %s, %s, %s);
         """
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, (slug, title, channel_id, channel_message_id, uploaded_by))
+                await cur.execute(sql, (slug, channel_id, channel_message_id, uploaded_by))
             await conn.commit()
 
     async def db_get_file(slug: str):
-        sql = "SELECT title, channel_id, channel_message_id FROM files WHERE slug = %s;"
+        sql = "SELECT channel_id, channel_message_id FROM files WHERE slug = %s;"
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(sql, (slug,))
                 row = await cur.fetchone()
                 if not row:
                     return None
-                title, ch_id, ch_msg_id = row
-                return str(title), int(ch_id), int(ch_msg_id)
+                return int(row[0]), int(row[1])
 
     async def db_iter_user_ids(batch_size: int = 2000):
         # tanpa OFFSET (lebih aman untuk 100k+)
@@ -337,7 +256,7 @@ async def main():
                 await bot.send_message(user_chat_id, text)
             return
 
-        _title, ch_id, ch_msg_id = found
+        ch_id, ch_msg_id = found
         try:
             await bot.copy_message(
                 chat_id=user_chat_id,
@@ -497,7 +416,7 @@ async def main():
             except Exception:
                 failed += 1
 
-            if processed % 2000 == 0:
+            if processed % 1000 == 0:
                 await message.answer(
                     f"Progress: {processed}/{total}\n"
                     f"✅ Terkirim: {sent}\n"
@@ -524,9 +443,36 @@ async def main():
             await message.answer("⛔ Kamu tidak punya akses upload.")
             return
 
+        # Ambil "nama file/judul" yang paling masuk akal dari pesan
+        def extract_title(m: Message) -> str:
+            if m.document:
+                return m.document.file_name or "document"
+            if m.video:
+                return m.video.file_name or "video"
+            if m.audio:
+                # audio kadang gak punya file_name tapi punya title/performer
+                if m.audio.file_name:
+                    return m.audio.file_name
+                if m.audio.performer and m.audio.title:
+                    return f"{m.audio.performer} - {m.audio.title}"
+                if m.audio.title:
+                    return m.audio.title
+                return "audio"
+            if m.voice:
+                return "voice"
+            if m.video_note:
+                return "video_note"
+            if m.photo:
+                return "photo"
+            if m.animation:
+                return m.animation.file_name or "animation"
+            if m.sticker:
+                # sticker biasanya ga ada file name
+                return f"sticker ({m.sticker.emoji or '🙂'})"
+            return "file"
+
         file_title = extract_title(message)
 
-        # 1) copy ke channel DB
         try:
             copied = await bot.copy_message(
                 chat_id=CHANNEL_ID,
@@ -537,30 +483,32 @@ async def main():
             await message.answer(f"❌ Gagal menyimpan ke channel DB. ({type(e).__name__})")
             return
 
-        # 2) slug mengikuti title
-        base_slug = normalize_slug_from_title(file_title)
-
-        # 3) insert (kalau duplikat slug, tambahin suffix)
-        slug = base_slug
-        for _ in range(10):
+        slug = make_slug()
+        for _ in range(3):
             try:
-                await db_put_file(slug, file_title, int(CHANNEL_ID), int(copied.message_id), int(uid))
+                await db_put_file(slug, int(CHANNEL_ID), int(copied.message_id), int(uid))
                 break
             except psycopg.errors.UniqueViolation:
-                suffix = make_suffix(4)
-                trimmed = base_slug[: max(1, 60 - (1 + len(suffix)))]
-                slug = f"{trimmed}-{suffix}"
+                slug = make_slug()
         else:
-            await message.answer("❌ Gagal membuat slug unik. Coba rename file / coba lagi.")
+            await message.answer("❌ Gagal membuat slug unik. Coba lagi.")
             return
 
-        link = public_link(slug)
-        await message.answer(
-            "✅ Tersimpan!\n"
-            f"Nama file: {file_title}\n"
-            "🔗 Link publik:\n"
-            f"{link}"
-        )
+        if BOT_USERNAME:
+            link = f"https://t.me/{BOT_USERNAME}?start={slug}"
+            await message.answer(
+                "✅ Tersimpan!\n"
+                f"Nama file: {file_title}\n"
+                "🔗 Link publik:\n"
+                f"{link}"
+            )
+        else:
+            await message.answer(
+                "✅ Tersimpan!\n"
+                f"Nama file: {file_title}\n"
+                f"Slug: {slug}\n"
+                "(Set BOT_USERNAME untuk link otomatis)"
+            )
 
     @dp.message()
     async def fallback(message: Message):
@@ -568,13 +516,7 @@ async def main():
         if is_owner(uid):
             await message.answer("Kirim file untuk disimpan, atau reply lalu /broadcast.")
         else:
-            await message.answer("Buka link file yang kamu punya ya (hepifile.com?start=...).")
-
-    # bersihkan webhook lama supaya polling tidak conflict
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-    except Exception:
-        pass
+            await message.answer("Buka link file yang kamu punya ya (t.me/<bot>?start=...).")
 
     try:
         await dp.start_polling(bot)
