@@ -495,7 +495,8 @@ async def main():
             return
 
         if BOT_USERNAME:
-            link = f"https://t.me/{BOT_USERNAME}?start={slug}"
+            # link = f"https://t.me/{BOT_USERNAME}?start={slug}"
+            link = f"https://hepifile.com?start={slug}"
             await message.answer(
                 "✅ Tersimpan!\n"
                 f"Nama file: {file_title}\n"
