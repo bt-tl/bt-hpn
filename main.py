@@ -443,6 +443,36 @@ async def main():
             await message.answer("⛔ Kamu tidak punya akses upload.")
             return
 
+        # Ambil "nama file/judul" yang paling masuk akal dari pesan
+        def extract_title(m: Message) -> str:
+            if m.document:
+                return m.document.file_name or "document"
+            if m.video:
+                return m.video.file_name or "video"
+            if m.audio:
+                # audio kadang gak punya file_name tapi punya title/performer
+                if m.audio.file_name:
+                    return m.audio.file_name
+                if m.audio.performer and m.audio.title:
+                    return f"{m.audio.performer} - {m.audio.title}"
+                if m.audio.title:
+                    return m.audio.title
+                return "audio"
+            if m.voice:
+                return "voice"
+            if m.video_note:
+                return "video_note"
+            if m.photo:
+                return "photo"
+            if m.animation:
+                return m.animation.file_name or "animation"
+            if m.sticker:
+                # sticker biasanya ga ada file name
+                return f"sticker ({m.sticker.emoji or '🙂'})"
+            return "file"
+
+        file_title = extract_title(message)
+
         try:
             copied = await bot.copy_message(
                 chat_id=CHANNEL_ID,
@@ -466,9 +496,19 @@ async def main():
 
         if BOT_USERNAME:
             link = f"https://t.me/{BOT_USERNAME}?start={slug}"
-            await message.answer(f"✅ Tersimpan!\n🔗 Link publik:\n{link}")
+            await message.answer(
+                "✅ Tersimpan!\n"
+                f"Nama file: {file_title}\n"
+                "🔗 Link publik:\n"
+                f"{link}"
+            )
         else:
-            await message.answer("✅ Tersimpan! (Set BOT_USERNAME untuk link otomatis)")
+            await message.answer(
+                "✅ Tersimpan!\n"
+                f"Nama file: {file_title}\n"
+                f"Slug: {slug}\n"
+                "(Set BOT_USERNAME untuk link otomatis)"
+            )
 
     @dp.message()
     async def fallback(message: Message):
