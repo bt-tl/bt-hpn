@@ -3,6 +3,7 @@ import re
 import asyncio
 import secrets
 import time
+from urllib.parse import quote
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
@@ -14,6 +15,7 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramBadRequest,
     TelegramNotFound,
+    TelegramConflictError,
 )
 
 import psycopg
@@ -48,6 +50,7 @@ REQUIRED_CHANNELS = [
     # maksimal 5 item
 ]
 
+
 # =========================
 # VALIDATION
 # =========================
@@ -71,7 +74,6 @@ def is_owner(user_id: int) -> bool:
 
 
 def extract_title(m: Message) -> str:
-    # judul yang paling "nyambung" dari Telegram
     if m.document:
         return m.document.file_name or "document"
     if m.video:
@@ -99,32 +101,32 @@ def extract_title(m: Message) -> str:
 
 def normalize_slug_from_title(title: str) -> str:
     """
-    Kamu minta slug mengikuti title, contoh:
+    Contoh:
     "zahra 23 + 24.zip" -> "zahra23+24.zip"
 
-    Kita:
-    - trim
     - hapus spasi
-    - hanya izinkan [a-zA-Z0-9 . _ - +]
-    - batasi panjang biar aman untuk deep-link Telegram (payload max 64).
+    - izinkan: a-zA-Z0-9 . _ - +
+    - batasi panjang payload start (Telegram deep link max 64 chars)
     """
     t = (title or "").strip()
-
-    # remove spaces
     t = re.sub(r"\s+", "", t)
-
-    # keep only safe chars (include dot & plus)
     t = re.sub(r"[^A-Za-z0-9._+\-]", "", t)
 
     if not t:
         t = "file"
 
-    # Telegram deep-link payload limit ~64 chars, kita sisakan ruang suffix bila perlu
+    # aman untuk payload + suffix
     return t[:60]
 
 
 def make_suffix(n: int = 4) -> str:
-    return secrets.token_hex(n // 2) if n % 2 == 0 else secrets.token_hex((n // 2) + 1)[:n]
+    # suffix hex kecil
+    if n <= 0:
+        return ""
+    # token_hex menghasilkan 2 char per byte
+    need = (n + 1) // 2
+    s = secrets.token_hex(need)
+    return s[:n]
 
 
 def gate_text() -> str:
@@ -160,7 +162,7 @@ async def is_joined_all(bot: Bot, user_id: int) -> bool:
             if status in ("left", "kicked") or status is None:
                 return False
         except Exception:
-            # bot gak bisa cek membership (biasanya bot tidak ada di channel private tsb)
+            # bot tidak bisa cek membership (misal bot tidak ada di channel private tsb)
             return False
 
     return True
@@ -183,9 +185,15 @@ class RateLimiter:
 
 
 def public_link(slug: str) -> str:
-    # NOTE: di query param, "+" sering dianggap spasi, jadi kita encode supaya literal.
-    # Kalau slug = "zahra23+24.zip" -> start=zahra23%2B24.zip
-    return f"{PUBLIC_BASE_URL}?start={quote(slug, safe='._-')}"
+    # "+" di query biasanya dianggap spasi, jadi harus di-encode -> %2B
+    # safe: biarkan . _ - tetap literal
+    encoded = quote(slug, safe="._-")
+    if PUBLIC_BASE_URL:
+        return f"{PUBLIC_BASE_URL}?start={encoded}"
+    # fallback ke t.me
+    if BOT_USERNAME:
+        return f"https://t.me/{BOT_USERNAME}?start={encoded}"
+    return f"?start={encoded}"
 
 
 # =========================
@@ -220,7 +228,7 @@ CREATE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id);
 # MAIN
 # =========================
 async def main():
-    # create pool inside event loop
+    # create pool inside event loop (fix: open=False + await open())
     pool = AsyncConnectionPool(
         conninfo=DATABASE_URL,
         min_size=1,
@@ -286,7 +294,7 @@ async def main():
                 return str(title), int(ch_id), int(ch_msg_id)
 
     async def db_iter_user_ids(batch_size: int = 2000):
-        # tanpa OFFSET (lebih stabil untuk 100k+)
+        # tanpa OFFSET (lebih aman untuk 100k+)
         last_id = 0
         while True:
             sql = """
@@ -530,21 +538,18 @@ async def main():
 
         # 3) insert (kalau duplikat slug, tambahin suffix)
         slug = base_slug
-        for attempt in range(10):
+        for _ in range(10):
             try:
                 await db_put_file(slug, file_title, int(CHANNEL_ID), int(copied.message_id), int(uid))
                 break
             except psycopg.errors.UniqueViolation:
-                # append suffix
                 suffix = make_suffix(4)
-                # jaga total panjang
                 trimmed = base_slug[: max(1, 60 - (1 + len(suffix)))]
                 slug = f"{trimmed}-{suffix}"
         else:
             await message.answer("❌ Gagal membuat slug unik. Coba rename file / coba lagi.")
             return
 
-        # 4) balas link publik
         link = public_link(slug)
         await message.answer(
             "✅ Tersimpan!\n"
@@ -561,13 +566,14 @@ async def main():
         else:
             await message.answer("Buka link file yang kamu punya ya (hepifile.com?start=...).")
 
+    # bersihkan webhook lama supaya polling tidak conflict
     try:
         await bot.delete_webhook(drop_pending_updates=True)
     except Exception:
         pass
 
-    await dp.start_polling(bot)
-
+    try:
+        await dp.start_polling(bot)
     finally:
         await pool.close()
 
