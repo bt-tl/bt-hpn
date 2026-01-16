@@ -563,10 +563,10 @@ async def main():
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
-        except Exception:
-            pass
-    
-        await dp.start_polling(bot)
+    except Exception:
+        pass
+
+    await dp.start_polling(bot)
 
     finally:
         await pool.close()
